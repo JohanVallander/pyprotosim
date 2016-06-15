@@ -38,7 +38,9 @@ class AVPItem:
         self.vendor=0
         self.type=""
         self.mandatory=""
-        
+        #self.data=None
+        #self.encoder_function=encode_OctetString
+
 class HDRItem:
     def __init__(self):
         self.ver=0
@@ -77,6 +79,7 @@ def LoadDictionary(file):
     doc = minidom.parse(file)
     node = doc.documentElement
     dict_avps = doc.getElementsByTagName("avp")
+
     dict_vendors = doc.getElementsByTagName("vendor")
     dict_commands=doc.getElementsByTagName("command")
     # Now lets process typedefs
@@ -117,16 +120,76 @@ def LoadDictionary(file):
            asIP.append(tName)           
         if tType in asTime:
            asTime.append(tName)   
-        
+    createPythonDictionaries()
+
+#speeds up lookups by creating a python dictionary with all names, using the old function _dictAVPname2code
+def createPythonDictionaries():
+    global dict_avps
+    global dict_vendors
+    global dict_commands
+
+    global avps_by_name
+    global avps_by_code
+
+    global vendor_code_by_name
+    global vendor_name_by_code
+
+    global command_name_by_code
+    global command_code_by_name
+    command_name_by_code={}
+    command_code_by_name={}
+    for command in dict_commands:
+         cName=command.getAttribute("name")
+         cCode=int(command.getAttribute("code"))
+         command_name_by_code[cCode]=cName
+         command_code_by_name[cName]=cCode
+
+    vendor_code_by_name={}
+    vendor_name_by_code={}
+    for vendor in dict_vendors:
+        vCode=int(vendor.getAttribute("code"))
+        vId=vendor.getAttribute("vendor-id")
+        vendor_code_by_name[vId]=vCode
+        vendor_name_by_code[vCode]=vId
+
+
+    avps_by_name={}
+    avps_by_code={}
+    for avp in dict_avps:
+        A=AVPItem()
+        _dictAVPname2code(A,avp.getAttribute("name"),"")
+        avps_by_name[A.name]=A
+        avps_by_code[(A.vendor,A.code)]=A
+
+
 # Find AVP definition in dictionary: User-Name->1
 # on finish A contains all data
+# faster version
 def dictAVPname2code(A,avpname,avpvalue):
+    global avps_by_name
+    dbg="Searching dictionary for N",avpname,"V",avpvalue
+    logging.debug(dbg)
+    try:
+        avp = avps_by_name[avpname]
+        A.name = avp.name
+        A.code = avp.code
+        A.mandatory=avp.mandatory
+        A.type = avp.type
+        A.vendor=avp.vendor
+        return
+    except:
+        dbg="Searching dictionary failed for N",avpname,"V",avpvalue
+        bailOut(dbg)
+
+# Find AVP definition in dictionary: User-Name->1
+# on finish A contains all data
+def _dictAVPname2code(A,avpname,avpvalue):
     global dict_avps
     dbg="Searching dictionary for N",avpname,"V",avpvalue
     logging.debug(dbg)
     for avp in dict_avps:
         A.name = avp.getAttribute("name")
-        A.code = avp.getAttribute("code")
+        A.code = int(avp.getAttribute("code"))
         A.mandatory=avp.getAttribute("mandatory")
         A.type = avp.getAttribute("type")
         vId = avp.getAttribute("vendor-id")
@@ -138,77 +201,69 @@ def dictAVPname2code(A,avpname,avpvalue):
            return
     dbg="Searching dictionary failed for N",avpname,"V",avpvalue
     bailOut(dbg)
-
+ 
 # Find AVP definition in dictionary: 1->User-Name
 # on finish A contains all data
+# stupid function for backwards compatibility
 def dictAVPcode2name(A,avpcode,vendorcode):
-    global dict_avps
-    dbg="Searching dictionary for ","C",avpcode,"V",vendorcode
-    logging.debug(dbg)
-    A.vendor=dictVENDORcode2id(int(vendorcode))
-    for avp in dict_avps:
-        A.name = avp.getAttribute("name")
-        A.type = avp.getAttribute("type")
-        A.code = int(avp.getAttribute("code"))
-        A.mandatory=avp.getAttribute("mandatory")
-        vId = avp.getAttribute("vendor-id")
-        if int(avpcode)==A.code:
-            if vId=="":
-               vId="None"
-            if vId==A.vendor:
-               return 
-    logging.info("Unsuccessful search")
-    A.code=avpcode
-    A.name="Unknown Attr-"+str(A.code)+" (Vendor:"+A.vendor+")"
-    A.type="OctetString"
-    return 
-
+    global avps_by_code
+    #try:
+    if True:
+        avp=avps_by_code[(vendorcode,avpcode)]
+        A.vendor=avp.vendor
+        A.name = avp.name
+        A.type = avp.type
+        A.code = avp.code
+        A.mandatory=avp.mandatory
+        A.vendor=avp.vendor
+        return
+    """
+    except:
+        logging.info("Unsuccessful search")
+        A.code=avpcode
+        A.name="Unknown Attr-"+str(A.code)+" (Vendor:"+str(A.vendor)+")"
+        A.type="OctetString"
+        return 
+    """
 # Find Vendor definition in dictionary: 10415->TGPP    
 def dictVENDORcode2id(code):
-    global dict_vendors
+    global vendor_name_by_code
     dbg="Searching Vendor dictionary for C",code
     logging.debug(dbg)
-    for vendor in dict_vendors:
-        vCode=vendor.getAttribute("code")
-        vId=vendor.getAttribute("vendor-id")
-        if code==int(vCode):
-            return vId
-    dbg="Searching Vendor dictionary failed for C",code
-    bailOut(dbg)
+    try:
+        return vendor_name_by_code[code]
+    except:
+        dbg="Searching Vendor dictionary failed for C",code
+        bailOut(dbg)
 
 # Find Vendor definition in dictionary: TGPP->10415    
 def dictVENDORid2code(vendor_id):
-    global dict_vendors
+    global vendor_code_by_name
     dbg="Searching Vendor dictionary for V",vendor_id
     logging.debug(dbg)
-    for vendor in dict_vendors:
-        Code=vendor.getAttribute("code")
-        vId=vendor.getAttribute("vendor-id")
-        if vendor_id==vId:
-            return int(Code)
-    dbg="Searching Vendor dictionary failed for V",vendor_id
-    bailOut(dbg)
+    try:
+        return vendor_code_by_name[vendor_id]
+    except:
+        dbg="Searching Vendor dictionary failed for V",vendor_id
+        bailOut(dbg)
 
 # Find Command definition in dictionary: Capabilities-Exchange->257    
 def dictCOMMANDname2code(name):
-    global dict_commands
-    for command in dict_commands:
-         cName=command.getAttribute("name")
-         cCode=command.getAttribute("code")
-         if cName==name:
-            return int(cCode)
-    dbg="Searching CMD dictionary failed for N",name
-    bailOut(dbg)
+    global command_code_by_name
+    try:
+        return command_code_by_name[name]
+    except:
+        dbg="Searching CMD dictionary failed for N",name
+        bailOut(dbg)
 
 # Find Command definition in dictionary: 257->Capabilities-Exchange
 def dictCOMMANDcode2name(flags,code):
-    global dict_commands
+    global command_name_by_code
     cmd=ERROR
-    for command in dict_commands:
-         cName=command.getAttribute("name")
-         cCode=command.getAttribute("code")
-         if code==int(cCode):
-            cmd=cName
+    try:
+        cmd=command_name_by_code["code"]
+    except:
+        pass
     if cmd==ERROR:
         return cmd
     if flags&DIAMETER_HDR_REQUEST==DIAMETER_HDR_REQUEST:
@@ -383,6 +438,7 @@ def decode_Grouped(data):
         ret.append(decodeAVP(gmsg))
     return ret
 
+
 #AVP_Time contains a second count since 1900    
 def decode_Time(data):
     seconds_between_1900_and_1970 = ((70*365)+17)*86400
@@ -422,15 +478,11 @@ def encode_finish(A,flags,pktlen,data):
        ret=("%08X" % int(A.vendor)) + ret
        flags|=DIAMETER_FLAG_VENDOR
        pktlen+=4
-    dbg="Packing","C:",A.code,"F:",flags,"V:",A.vendor,"L:",pktlen,"D:",ret
-    logging.debug(dbg)
     ret=("%08X"%int(A.code))+("%02X"%int(flags))+("%06X"%pktlen)+ret
     return ret
     
 def encode_OctetString(A,flags,data):
     fs="!"+str(len(data))+"s"
-    dbg="Encoding String format:",fs
-    logging.debug(dbg)
     ret=struct.pack(fs,data).encode("hex")
     pktlen=8+len(ret)/2
     return encode_finish(A,flags,pktlen,ret)
@@ -438,8 +490,6 @@ def encode_OctetString(A,flags,data):
 def encode_UTF8String(A,flags,data):
     utf8data=utf8encoder(data)[0]
     fs="!"+str(len(utf8data))+"s"
-    dbg="Encoding UTF8",utf8data,"L",len(utf8data),"F",fs
-    logging.debug(dbg)
     ret=struct.pack(fs,utf8data).encode("hex")
     pktlen=8+len(ret)/2
     return encode_finish(A,flags,pktlen,ret)
@@ -546,26 +596,11 @@ def do_encode(A,flags,data):
 
 # Find AVP Definition in dictionary and encode it
 def getAVPDef(AVP_Name,AVP_Value):
-    A=AVPItem()
+    global avps_by_name
+    A=avps_by_name[AVP_Name]
     dictAVPname2code(A,AVP_Name,AVP_Value)
-    if A.name=="":
-       logging.error("AVP with that name not found")
-       return ""
-    if A.code==0:
-       logging.error("AVP Code not found")
-       return ""
-    if A.type=="":
-       logging.error("AVP type not defined")
-       return ""
-    if A.vendor<0:
-       logging.error("Vendor ID does not match")
-       return ""
-    else:
-        data=AVP_Value
-    dbg="AVP dictionary def","N",A.name,"C",A.code,"M",A.mandatory,"T",A.type,"V",A.vendor,"D",data
-    logging.debug(dbg)
     flags=checkMandatory(A.mandatory)
-    return do_encode(A,flags,data)
+    return do_encode(A,flags,AVP_Value)
 
 ################################
 # Main encoding routine  
@@ -579,13 +614,74 @@ def encodeAVP(AVP_Name,AVP_Value):
         msg=getAVPDef(AVP_Name,p.decode("hex"))
     else:
         msg=getAVPDef(AVP_Name,AVP_Value)
-    dbg="AVP",AVP_Name,AVP_Value,"Encoded as:",msg
-    logging.info(dbg)
     return msg
 
 # Calculate message padding
 def calc_padding(msg_len):
     return (msg_len+3)&~3 
+
+
+#----------------------------------------------------------------------    
+################################
+# Main decoding routine  
+# Input: single AVP as HEX string
+def decodeAVP_As_Dict(msg):
+    (scode,msg)=chop_msg(msg,8)
+    (sflag,msg)=chop_msg(msg,2)
+    (slen,msg)=chop_msg(msg,6)
+    dbg="Decoding ","C",scode,"F",sflag,"L",slen,"D",msg
+    logging.debug(dbg)
+    mcode=struct.unpack("!I",scode.decode("hex"))[0]
+    mflags=ord(sflag.decode("hex"))
+    data_len=struct.unpack("!I","\00"+slen.decode("hex"))[0]
+    mvid=0
+    if mflags & DIAMETER_FLAG_VENDOR:
+        (svid,msg)=chop_msg(msg,8)
+        mvid=struct.unpack("!I",svid.decode("hex"))[0]
+        data_len-=4
+    A=AVPItem()
+    dictAVPcode2name(A,mcode,mvid)
+
+    ret=""
+
+    decoded=False
+    if A.type in asI32:
+        ret= decode_Integer32(msg)
+        decoded=True
+    if A.type in asI64:
+        decoded=True
+        ret= decode_Integer64(msg)
+    if A.type in asU32:
+        decoded=True
+        ret= decode_Unsigned32(msg)
+    if A.type in asU64:
+        decoded=True
+        ret= decode_Unsigned64(msg)
+    if A.type in asF32:
+        decoded=True
+        ret= decode_Float32(msg)
+    if A.type in asF64:
+        decoded=True
+        ret= decode_Float64(msg)        
+    if A.type in asUTF8:
+        decoded=True
+        ret= decode_UTF8String(msg,data_len)
+    if A.type in asIPAddress:
+        decoded=True
+        ret= decode_Address(msg)
+    if A.type in asIP:
+        decoded=True
+        ret= decode_IP(msg)        
+    if A.type in asTime:
+        decoded=True
+        ret= decode_Time(msg)
+    if A.type=="Grouped":
+        decoded=True
+        ret= dictFromMsgAVPs(msg)
+    if not decoded:
+      # default is OctetString
+      ret= decode_OctetString(msg,data_len)
+    return {A.name:ret}
 
 #----------------------------------------------------------------------    
 ################################
@@ -612,55 +708,41 @@ def decodeAVP(msg):
     ret=""
     decoded=False
     if A.type in asI32:
-        logging.debug("Decoding Integer32")
         ret= decode_Integer32(msg)
         decoded=True
     if A.type in asI64:
         decoded=True
-        logging.debug("Decoding Integer64")
         ret= decode_Integer64(msg)
     if A.type in asU32:
         decoded=True
-        logging.debug("Decoding Unsigned32")
         ret= decode_Unsigned32(msg)
     if A.type in asU64:
         decoded=True
-        logging.debug("Decoding Unsigned64")
         ret= decode_Unsigned64(msg)
     if A.type in asF32:
         decoded=True
-        logging.debug("Decoding Float32")
         ret= decode_Float32(msg)
     if A.type in asF64:
         decoded=True
-        logging.debug("Decoding Float64")
         ret= decode_Float64(msg)        
     if A.type in asUTF8:
         decoded=True
-        logging.debug("Decoding UTF8String")
         ret= decode_UTF8String(msg,data_len)
     if A.type in asIPAddress:
         decoded=True
-        logging.debug("Decoding IPAddress")
         ret= decode_Address(msg)
     if A.type in asIP:
         decoded=True
-        logging.debug("Decoding IP")
         ret= decode_IP(msg)        
     if A.type in asTime:
         decoded=True
-        logging.debug("Decoding Time")
         ret= decode_Time(msg)
     if A.type=="Grouped":
         decoded=True
-        logging.debug("Decoding Grouped")
         ret= decode_Grouped(msg)
     if not decoded:
       # default is OctetString
-      logging.debug("Decoding OctetString")
       ret= decode_OctetString(msg,data_len)
-    dbg="Decoded as",A.name,ret
-    logging.info(dbg)
     return (A.name,ret)
 
 # Search for AVP in undecoded list
@@ -720,11 +802,26 @@ def createRes(H,avps):
     H.len=len(data)/2+20
     ret="01"+"%06X" % H.len+"%02X"%int(H.flags) + "%06X"%int(H.cmd)
     ret=ret+"%08X"%H.appId+"%08X"%H.HopByHop+ "%08X"%H.EndToEnd+data
-    dbg="Header fields","L",H.len,"F",H.flags,"C",H.cmd,"A",H.appId,"H",H.HopByHop,"E",H.EndToEnd
-    logging.debug(dbg)
-    dbg="Diameter hdr+data",ret
-    logging.debug(dbg)
     return ret
+
+##########################johan egna funktioner#################################
+# Create diameter Response from <avps> and fields from Header H and clear request flag and is also slimmed down
+def createResponse(H,avps):
+    data=joinAVPs(avps)
+    H.len=len(data)/2+20
+    ret="01"+"%06X" % H.len+"%02X"%int(H.flags&127) + "%06X"%int(H.cmd)
+    ret=ret+"%08X"%H.appId+"%08X"%H.HopByHop+ "%08X"%H.EndToEnd+data
+    return ret
+
+# Create diameter Response from <avps> and fields from Header H and clear request flag and is also slimmed down
+def createRequest(H,avps):
+    data=joinAVPs(avps)
+    H.len=len(data)/2+20
+    ret="01"+"%06X" % H.len+"%02X"%int(H.flags|DIAMETER_HDR_REQUEST) + "%06X"%int(H.cmd)
+    ret=ret+"%08X"%H.appId+"%08X"%H.HopByHop+ "%08X"%H.EndToEnd+data
+    return ret
+###############################################################################
+
 
 # Set Hop-by-Hop and End-to-End fields to sane values    
 def initializeHops(H):
@@ -746,8 +843,6 @@ def initializeHops(H):
 # Result: class H with splitted message (header+message)
 # AVPs in message are NOT splitted
 def stripHdr(H,msg):
-    dbg="Incoming Diameter msg",msg
-    logging.info(dbg)
     if len(msg)==0:
         return ERROR
     (sver,msg)=chop_msg(msg,2)
@@ -757,8 +852,6 @@ def stripHdr(H,msg):
     (sapp,msg)=chop_msg(msg,8)
     (shbh,msg)=chop_msg(msg,8)
     (sete,msg)=chop_msg(msg,8)
-    dbg="Split hdr","V",sver,"L",slen,"F",sflag,"C",scode,"A",sapp,"H",shbh,"E",sete,"D",msg
-    logging.debug(dbg)
     H.ver=ord(sver.decode("hex"))
     H.flags=ord(sflag.decode("hex"))
     H.len=struct.unpack("!I","\00"+slen.decode("hex"))[0]
@@ -766,10 +859,6 @@ def stripHdr(H,msg):
     H.appId=struct.unpack("!I",sapp.decode("hex"))[0]
     H.HopByHop=struct.unpack("!I",shbh.decode("hex"))[0]
     H.EndToEnd=struct.unpack("!I",sete.decode("hex"))[0]
-    dbg="Read","V",H.ver,"L",H.len,"F",H.flags,"C",H.cmd,"A",H.appId,"H",H.HopByHop,"E",H.EndToEnd
-    logging.debug(dbg)
-    dbg=dictCOMMANDcode2name(H.flags,H.cmd)
-    logging.info(dbg)
     H.msg=msg
     return 
 
@@ -778,21 +867,57 @@ def stripHdr(H,msg):
 # Result: list of undecoded AVPs
 def splitMsgAVPs(msg):
     ret=[]
-    dbg="Incoming avps",msg
-    logging.debug(dbg)
     while len(msg)<>0:
       slen="00"+msg[10:16]
       mlen=struct.unpack("!I",slen.decode("hex"))[0]
       #Increase to boundary
       plen=calc_padding(mlen)
       (avp,msg)=chop_msg(msg,2*plen)
-      dbg="Single AVP","L",mlen,plen,"D",avp
-      logging.info(dbg)
       ret.append(avp)
     return ret
 
+def dictFromMsgAVPs(msg):
+    ret={}
+    while len(msg)<>0:
+      slen="00"+msg[10:16]
+      mlen=struct.unpack("!I",slen.decode("hex"))[0]
+      #Increase to boundary
+      plen=calc_padding(mlen)
+      (avp,msg)=chop_msg(msg,2*plen)
+      #name,value=decodeAVP(avp)
+      ret.update(decodeAVP_As_Dict(avp))
+    return ret
+
+
 #---------------------------------------------------------------------- 
  
+
+def diameterGenerator(con):
+    BUFFER_SIZE=4096
+    msg="".encode('hex')
+    while True:
+        read,write,error=select.select([con],[],[],1)
+        for r in read :
+            if r == con:
+                msg+=con.recv(BUFFER_SIZE).encode('hex')
+                try:
+                    length = int(msg[2:8],16)*2
+                except:
+                    length=0
+                while len(msg)>=length:
+                    rawdata,msg = chop_msg(msg,length)
+                    if len(rawdata) == 0:
+                        yield None
+                    else:
+                        H=HDRItem()
+                        stripHdr(H,rawdata)
+                        yield (H,dictFromMsgAVPs(H.msg))
+                    if len(msg) < 9:
+                        break
+                    length = int(msg[2:8],16)*2
+
+
+
 # Connect to host:port (TCP) 
 def Connect(host,port):
     # Create a socket (SOCK_STREAM means a TCP socket)
