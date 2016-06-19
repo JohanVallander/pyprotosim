@@ -278,24 +278,20 @@ def dictAVPname2code(A,avpname,avpvalue):
 # stupid function for backwards compatibility
 def dictAVPcode2name(A,avpcode,vendorcode):
     global avps_by_code
-    #try:
-    if True:
+    try:
         avp=avps_by_code[(vendorcode,avpcode)]
-        A.vendor=avp.vendor
-        A.name = avp.name
-        A.type = avp.type
-        A.code = avp.code
-        A.mandatory=avp.mandatory
-        A.vendor=avp.vendor
-        return
-    """
     except:
-        logging.info("Unsuccessful search")
-        A.code=avpcode
-        A.name="Unknown Attr-"+str(A.code)+" (Vendor:"+str(A.vendor)+")"
-        A.type="OctetString"
-        return 
-    """
+        dbg="Search for AVP with vendor-id %d and code %d failed"%(vendorcode,avpcode)
+        bailOut(dbg)
+        
+    A.vendor=avp.vendor
+    A.name = avp.name
+    A.type = avp.type
+    A.code = avp.code
+    A.mandatory=avp.mandatory
+    A.vendor=avp.vendor
+    return
+
 # Find Vendor definition in dictionary: 10415->TGPP    
 def dictVENDORcode2id(code):
     global vendor_name_by_code
@@ -607,6 +603,7 @@ def encode_Enumerated(A,flags,data):
     global dict_avps
     if isinstance(data,str):
         # Replace with enum code value
+        ####################################################Fix here ##########################################
         for avp in dict_avps:
             Name = avp.getAttribute("name")
             if Name==A.name:
@@ -636,30 +633,7 @@ def checkMandatory(mandatory):
     return flags
     
 def do_encode(A,flags,data):
-    if A.type in asUTF8:
-        return encode_UTF8String(A,flags,data)
-    if A.type in asI32:
-        return encode_Integer32(A,flags,data)
-    if A.type in asU32:
-        return encode_Unsigned32(A,flags,data)
-    if A.type in asI64:
-        return encode_Integer64(A,flags,data)
-    if A.type in asU64:
-        return encode_Unsigned64(A,flags,data)
-    if A.type in asF32:
-        return encode_Float32(A,flags,data)
-    if A.type in asF64:
-        return encode_Float64(A,flags,data)
-    if A.type in asIPAddress:
-        return encode_Address(A,flags,data)
-    if A.type in asIP:
-        return encode_IP(A,flags,data)        
-    if A.type in asTime:
-        return encode_Time(A,flags,data)
-    if A.type=="Enumerated":
-        return encode_Enumerated(A,flags,data)
-    # default is OctetString  
-    return encode_OctetString(A,flags,data) 
+    return A.encode_fun(A,flags,data)
 
 # Find AVP Definition in dictionary and encode it
 def getAVPDef(AVP_Name,AVP_Value):
@@ -768,10 +742,9 @@ def decodeAVP(msg):
         (svid,msg)=chop_msg(msg,8)
         mvid=struct.unpack("!I",svid.decode("hex"))[0]
         data_len-=4
-    A=AVPItem()
-    dictAVPcode2name(A,mcode,mvid)
-    dbg="Read","N",A.name,"T",A.type,"C",A.code,"F",mflags,"L",data_len,"V",A.vendor,mvid,"D",msg
-    logging.debug(dbg)
+    A=avps_by_code[(mvid,mcode)]
+    #A=AVPItem()
+    #dictAVPcode2name(A,mcode,mvid)
     ret=""
     decoded=False
     if A.type in asI32:
@@ -951,7 +924,6 @@ def dictFromMsgAVPs(msg):
       #Increase to boundary
       plen=calc_padding(mlen)
       (avp,msg)=chop_msg(msg,2*plen)
-      #name,value=decodeAVP(avp)
       ret.update(decodeAVP_As_Dict(avp))
     return ret
 
@@ -1029,3 +1001,7 @@ def date2epoch(tYear,tMon,tDate,tHr,tMin,tSec):
 #                          - logging levels modified, Time support added
 #                          - Enumerated now supports named values
 #                          - Fixed IP handling (now supports IP & IPAddress packing)
+
+#######################################################
+#Johan Vallander's modifications
+# Ver ??? - Jun 20, 2016 - speeded up using dictionaries, also added diameterGenerator function which returns the header, and a python dictionary of AVPs
