@@ -13,7 +13,7 @@
     <!-- IP is 4 byte IP Address, IPAddress is 6 byte -->
     <typedef name="DiameterIdentity"       type="OctetString"/>
     <typedef name="IPFilterRule"           type="OctetString"/>
-    <typedef name="QOSFilterRule"          type="OctetString"/>
+    <typedef name="QoSFilterRule"          type="OctetString"/>
     <typedef name="MIPRegistrationRequest" type="OctetString"/>
     <typedef name="DiameterURI"            type="UTF8String"/>
     <typedef name="VendorId"               type="Unsigned32"/>
