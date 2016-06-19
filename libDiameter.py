@@ -16,6 +16,7 @@ import sys
 import logging
 import time
 import string
+import select
 
 # Diameter Header fields
 
@@ -32,25 +33,33 @@ ERROR = -1
  
 # Hopefully let's keep dictionary definition compatibile
 class AVPItem:
+    code=0
+    name=""
+    vendor=0
+    basic_type=""
+    type=""
+    mandatory=""
+    enumerations={}
+    names={}
+    encode_fun=None
+    decode_fun=None
+
     def __init__(self):
-        self.code=0
-        self.name=""
-        self.vendor=0
-        self.type=""
-        self.mandatory=""
-        #self.data=None
-        #self.encoder_function=encode_OctetString
+        pass
 
 class HDRItem:
+    ver=0
+    flags=0
+    len=0
+    cmd=0
+    appId=0
+    HobByHop=0
+    EndToEnd=0
+    msg=""
+
     def __init__(self):
-        self.ver=0
-        self.flags=0
-        self.len=0
-        self.cmd=0
-        self.appId=0
-        self.HobByHop=0
-        self.EndToEnd=0
-        self.msg=""
+        pass
+    
     
 #----------------------------------------------------------------------
 
@@ -65,6 +74,8 @@ def LoadDictionary(file):
     global dict_avps
     global dict_vendors
     global dict_commands
+    global dict_typedefs
+    global typedef_dict
     global asString
     global asUTF8
     global asU32
@@ -76,6 +87,16 @@ def LoadDictionary(file):
     global asIPAddress
     global asIP
     global asTime
+    global dict_avps
+    global dict_vendors
+    global dict_commands
+    global avps_by_name
+    global avps_by_code
+    global vendor_code_by_name
+    global vendor_name_by_code
+    global command_name_by_code
+    global command_code_by_name
+
     doc = minidom.parse(file)
     node = doc.documentElement
     dict_avps = doc.getElementsByTagName("avp")
@@ -85,7 +106,7 @@ def LoadDictionary(file):
     # Now lets process typedefs
     asString=["OctetString"]
     asUTF8=["UTF8String"]
-    asI32=["Integer32"]
+    asI32=["Integer32","Enumerated"]
     asU32=["Unsigned32"]
     asF32=["Float32"]
     asI64=["Integer64"]
@@ -93,49 +114,66 @@ def LoadDictionary(file):
     asF64=["Float64"]
     asIPAddress=["IPAddress"]
     asIP=["IP"]    
-    asTime=["Time"]    
+    asTime=["Time"]
+    asGrouped=["Grouped"]
     dict_typedefs=doc.getElementsByTagName("typedef")
+    typedef_dict={"Enumerated":"Integer32",
+                  "OctetString":"OctetString",
+                  "UTF8String":"UTF8String",
+                  "Integer32":"Integer32",
+                  "Unsigned32":"Unsigned32",
+                  "Float32":"Float32",
+                  "Integer32":"Integer32",
+                  "Unsigned64":"Unsigned64",
+                  "Integer64":"Integer64",
+                  "Float64":"Float64",
+                  "IPAddress":"IPAddress",
+                  "IP":"IP",
+                  "Time":"Time",
+                  "Grouped":"Grouped",
+              }
     for td in dict_typedefs:
         tName=td.getAttribute("name")
         tType=td.getAttribute("type")
         if tType in asString:
-           asString.append(tName)
+            typedef_dict[tName]='OctetString'
+            asString.append(tName)
         if tType in asUTF8:
-           asUTF8.append(tName)
+            typedef_dict[tName]='UTF8String'
+            asUTF8.append(tName)
         if tType in asU32:
-           asU32.append(tName)
+            typedef_dict[tName]='Unsigned32'
+            asU32.append(tName)
         if tType in asI32:
-           asI32.append(tName)
+            typedef_dict[tName]='Integer32'
+            asI32.append(tName)
         if tType in asI64:
-           asI64.append(tName)    
+            typedef_dict[tName]='Integer64'
+            asI64.append(tName)    
         if tType in asU64:
-           asU64.append(tName)           
+            typedef_dict[tName]='Unsigned64'
+            asU64.append(tName)           
         if tType in asF32:
-           asF32.append(tName)           
+            typedef_dict[tName]='Float32'
+            asF32.append(tName)           
         if tType in asF64:
-           asF64.append(tName)           
+            typedef_dict[tName]='Float64'
+            asF64.append(tName)           
         if tType in asIPAddress:
-           asIPAddress.append(tName)
+            typedef_dict[tName]='IPAddress'
+            asIPAddress.append(tName)
         if tType in asIP:
-           asIP.append(tName)           
+            typedef_dict[tName]='IP'
+            asIP.append(tName)           
         if tType in asTime:
-           asTime.append(tName)   
-    createPythonDictionaries()
-
-#speeds up lookups by creating a python dictionary with all names, using the old function _dictAVPname2code
-def createPythonDictionaries():
-    global dict_avps
-    global dict_vendors
-    global dict_commands
-
-    global avps_by_name
-    global avps_by_code
-
-    global vendor_code_by_name
-    global vendor_name_by_code
-
-    global command_name_by_code
-    global command_code_by_name
+            typedef_dict[tName]='Time'
+            asTime.append(tName)   
+        if tType in asGrouped:
+            typedef_dict[tName]='Grouped'
+            asGrouped.append(tName)
+        
+    #speeds up lookups by creating a python dictionary with all names, using the old function _dictAVPname2code
+    print "creating dictionaries"
     command_name_by_code={}
     command_code_by_name={}
     for command in dict_commands:
@@ -143,7 +181,8 @@ def createPythonDictionaries():
          cCode=int(command.getAttribute("code"))
          command_name_by_code[cCode]=cName
          command_code_by_name[cName]=cCode
-
+    print "command dict created"
+    
     vendor_code_by_name={}
     vendor_name_by_code={}
     for vendor in dict_vendors:
@@ -151,24 +190,76 @@ def createPythonDictionaries():
         vId=vendor.getAttribute("vendor-id")
         vendor_code_by_name[vId]=vCode
         vendor_name_by_code[vCode]=vId
-
+    print "vendor dict created"
 
     avps_by_name={}
     avps_by_code={}
     for avp in dict_avps:
         A=AVPItem()
-        _dictAVPname2code(A,avp.getAttribute("name"),"")
+        A.name=avp.getAttribute("name")
+        A.code=int(avp.getAttribute("code"))
+        try:
+            A.vendor=int(vendor_code_by_name[avp.getAttribute("vendor-id")])
+        except:
+            A.vendor=0
         avps_by_name[A.name]=A
         avps_by_code[(A.vendor,A.code)]=A
 
+        A.type=avp.getAttribute("type")
+        try:
+            A.basic_type=typedef_dict[A.type]
+        except:
+            A.basic_type="OctetString"
+        if A.type=="Enumerated":
+            enumerations = avp.getElementsByTagName("enum")
+            for e in enumerations:
+                A.enumerations[e.getAttribute('code')]=e.getAttribute('name')
+                A.names[e.getAttribute('name')]=e.getAttribute('code')
 
+        if A.type in asUTF8:
+            A.encode_fun=encode_UTF8String
+            A.decode_fun=decode_UTF8String
+        elif A.type in asI32:
+            A.encode_fun=encode_Integer32
+            A.decode_fun=decode_Integer32 
+        elif A.type in asU32:
+            A.encode_fun=encode_Unsigned32
+            A.decode_fun=decode_Unsigned32
+        elif A.type in asI64:
+            A.encode_fun=encode_Integer64
+            A.decode_fun=decode_Integer64
+        elif A.type in asU64:
+            A.encode_fun=encode_Unsigned64
+            A.decode_fun=decode_Unsigned64
+        elif A.type in asF32:
+            A.encode_fun=encode_Float32
+            A.decode_fun=decode_Float32
+        elif A.type in asF64:
+            A.encode_fun=encode_Float64
+            A.decode_fun=decode_Float64
+        elif A.type in asIPAddress:
+            A.encode_fun=encode_Address
+            A.decode_fun=decode_Address
+        elif A.type in asIP:
+            A.encode_fun=encode_IP
+            A.decode_fun=decode_IP
+        elif A.type in asTime:
+            A.encode_fun=encode_Time
+            A.decode_fun=decode_Time
+        elif A.type=="Enumerated":
+            A.encode_fun=encode_Enumerated
+            A.decode_fun=decode_Enumerated
+        else:
+            A.encode_fun=encode_OctetString
+            A.decode_fun=decode_OctetString
+    print "avp dict created"
+        
+    
 # Find AVP definition in dictionary: User-Name->1
 # on finish A contains all data
 # faster version
 def dictAVPname2code(A,avpname,avpvalue):
     global avps_by_name
-    dbg="Searching dictionary for N",avpname,"V",avpvalue
-    logging.debug(dbg)
     try:
         avp = avps_by_name[avpname]
         A.name = avp.name
@@ -181,26 +272,6 @@ def dictAVPname2code(A,avpname,avpvalue):
         dbg="Searching dictionary failed for N",avpname,"V",avpvalue
         bailOut(dbg)
 
-# Find AVP definition in dictionary: User-Name->1
-# on finish A contains all data
-def _dictAVPname2code(A,avpname,avpvalue):
-    global dict_avps
-    dbg="Searching dictionary for N",avpname,"V",avpvalue
-    logging.debug(dbg)
-    for avp in dict_avps:
-        A.name = avp.getAttribute("name")
-        A.code = int(avp.getAttribute("code"))
-        A.mandatory=avp.getAttribute("mandatory")
-        A.type = avp.getAttribute("type")
-        vId = avp.getAttribute("vendor-id")
-        if avpname==A.name:
-           if vId=="":
-                A.vendor=0
-           else:
-                A.vendor=dictVENDORid2code(vId)
-           return
-    dbg="Searching dictionary failed for N",avpname,"V",avpvalue
-    bailOut(dbg)
  
 # Find AVP definition in dictionary: 1->User-Name
 # on finish A contains all data
@@ -228,8 +299,6 @@ def dictAVPcode2name(A,avpcode,vendorcode):
 # Find Vendor definition in dictionary: 10415->TGPP    
 def dictVENDORcode2id(code):
     global vendor_name_by_code
-    dbg="Searching Vendor dictionary for C",code
-    logging.debug(dbg)
     try:
         return vendor_name_by_code[code]
     except:
@@ -239,8 +308,6 @@ def dictVENDORcode2id(code):
 # Find Vendor definition in dictionary: TGPP->10415    
 def dictVENDORid2code(vendor_id):
     global vendor_code_by_name
-    dbg="Searching Vendor dictionary for V",vendor_id
-    logging.debug(dbg)
     try:
         return vendor_code_by_name[vendor_id]
     except:
@@ -899,6 +966,7 @@ def diameterGenerator(con):
         read,write,error=select.select([con],[],[],1)
         for r in read :
             if r == con:
+                
                 msg+=con.recv(BUFFER_SIZE).encode('hex')
                 try:
                     length = int(msg[2:8],16)*2
@@ -907,7 +975,7 @@ def diameterGenerator(con):
                 while len(msg)>=length:
                     rawdata,msg = chop_msg(msg,length)
                     if len(rawdata) == 0:
-                        yield None
+                        yield (None,None)
                     else:
                         H=HDRItem()
                         stripHdr(H,rawdata)
