@@ -172,7 +172,6 @@ def LoadDictionary(file):
             typedef_dict[tName]='Grouped'
             asGrouped.append(tName)
         
-    #speeds up lookups by creating a python dictionary with all names, using the old function _dictAVPname2code
     print "creating dictionaries"
     command_name_by_code={}
     command_code_by_name={}
@@ -432,31 +431,31 @@ def pack_address(address):
 # Decoding section
 #
 
-def decode_Integer32(data):
+def decode_Integer32(data,dlen=None):
     ret=struct.unpack("!I",data.decode("hex"))[0]
     return int(ret)
 
-def decode_Integer64(data):
+def decode_Integer64(data,dlen=None):
     ret=struct.unpack("!Q",data.decode("hex"))[0]
     return int(ret)
   
-def decode_Unsigned32(data):
+def decode_Unsigned32(data,dlen=None):
     ret=struct.unpack("!I",data.decode("hex"))[0]
     return int(ret)
   
-def decode_Unsigned64(data):
+def decode_Unsigned64(data,dlen=None):
     ret=struct.unpack("!Q",data.decode("hex"))[0]
     return int(ret)
 
-def decode_Float32(data):
+def decode_Float32(data,dlen=None):
     ret=struct.unpack("!f",data.decode("hex"))[0]
     return ret
 
-def decode_Float64(data):
+def decode_Float64(data,dlen=None):
     ret=struct.unpack("!d",data.decode("hex"))[0]
     return ret
     
-def decode_Address(data):
+def decode_Address(data,dlen=None):
     if len(data)<=16:
         data=data[4:12]
         ret=inet_ntop(socket.AF_INET,data.decode("hex"))
@@ -465,14 +464,14 @@ def decode_Address(data):
         ret=inet_ntop(socket.AF_INET6,data.decode("hex"))
     return ret
 
-def decode_IP(data):
+def decode_IP(data,dlen=None):
     if len(data)<=16:
         ret=inet_ntop(socket.AF_INET,data.decode("hex"))
     else:
         ret=inet_ntop(socket.AF_INET6,data.decode("hex"))
     return ret
     
-def decode_OctetString(data,dlen):
+def decode_OctetString(data,dlen):     
     fs="!"+str(dlen-8)+"s"
     dbg="Deconding String with format:",fs
     logging.debug(dbg)
@@ -487,15 +486,13 @@ def decode_OctetString(data,dlen):
 #0xF0..0xF4   First byte of a 4-byte character encoding
 #Note:0xF5-0xFF cannot occur    
 def decode_UTF8String(data,dlen):
+    dlen = dlen or len(data)
     fs="!"+str(dlen-8)+"s"
-    dbg="Decoding UTF8 format:",fs
-    logging.debug(dbg)
     ret=struct.unpack(fs,data.decode("hex")[0:dlen-8])[0]
     utf8=utf8decoder(ret)
     return utf8[0]
 
-def decode_Grouped(data):
-    dbg="Decoding Grouped:"
+def decode_Grouped(data,dlen=None):
     ret=[]
     for gmsg in splitMsgAVPs(data):
         ret.append(decodeAVP(gmsg))
@@ -503,7 +500,7 @@ def decode_Grouped(data):
 
 
 #AVP_Time contains a second count since 1900    
-def decode_Time(data):
+def decode_Time(data,dlen=None):
     seconds_between_1900_and_1970 = ((70*365)+17)*86400
     ret=struct.unpack("!I",data.decode("hex"))[0]
     return int(ret)-seconds_between_1900_and_1970
@@ -602,16 +599,7 @@ def encode_IP(A,flags,data):
 def encode_Enumerated(A,flags,data):
     global dict_avps
     if isinstance(data,str):
-        # Replace with enum code value
-        ####################################################Fix here ##########################################
-        for avp in dict_avps:
-            Name = avp.getAttribute("name")
-            if Name==A.name:
-                for e in avp.getElementsByTagName("enum"):
-                    if data==e.getAttribute("name"):
-                        return encode_Integer32(A,flags,int(e.getAttribute("code")))
-                dbg="Enum name=",data,"not found for AVP",A.name
-                bailOut(dbg)
+        return encode_Integer32(A,flags,A.names['data'])
     else:
         return encode_Integer32(A,flags,data)
     
@@ -680,48 +668,11 @@ def decodeAVP_As_Dict(msg):
         (svid,msg)=chop_msg(msg,8)
         mvid=struct.unpack("!I",svid.decode("hex"))[0]
         data_len-=4
-    A=AVPItem()
-    dictAVPcode2name(A,mcode,mvid)
-
+    #A=AVPItem()
+    #dictAVPcode2name(A,mcode,mvid)
+    A=avps_by_code[mvid,mcode]
     ret=""
-
-    decoded=False
-    if A.type in asI32:
-        ret= decode_Integer32(msg)
-        decoded=True
-    if A.type in asI64:
-        decoded=True
-        ret= decode_Integer64(msg)
-    if A.type in asU32:
-        decoded=True
-        ret= decode_Unsigned32(msg)
-    if A.type in asU64:
-        decoded=True
-        ret= decode_Unsigned64(msg)
-    if A.type in asF32:
-        decoded=True
-        ret= decode_Float32(msg)
-    if A.type in asF64:
-        decoded=True
-        ret= decode_Float64(msg)        
-    if A.type in asUTF8:
-        decoded=True
-        ret= decode_UTF8String(msg,data_len)
-    if A.type in asIPAddress:
-        decoded=True
-        ret= decode_Address(msg)
-    if A.type in asIP:
-        decoded=True
-        ret= decode_IP(msg)        
-    if A.type in asTime:
-        decoded=True
-        ret= decode_Time(msg)
-    if A.type=="Grouped":
-        decoded=True
-        ret= dictFromMsgAVPs(msg)
-    if not decoded:
-      # default is OctetString
-      ret= decode_OctetString(msg,data_len)
+    ret = A.decode_fun(msg,data_len)
     return {A.name:ret}
 
 #----------------------------------------------------------------------    
@@ -732,8 +683,6 @@ def decodeAVP(msg):
     (scode,msg)=chop_msg(msg,8)
     (sflag,msg)=chop_msg(msg,2)
     (slen,msg)=chop_msg(msg,6)
-    dbg="Decoding ","C",scode,"F",sflag,"L",slen,"D",msg
-    logging.debug(dbg)
     mcode=struct.unpack("!I",scode.decode("hex"))[0]
     mflags=ord(sflag.decode("hex"))
     data_len=struct.unpack("!I","\00"+slen.decode("hex"))[0]
@@ -742,47 +691,9 @@ def decodeAVP(msg):
         (svid,msg)=chop_msg(msg,8)
         mvid=struct.unpack("!I",svid.decode("hex"))[0]
         data_len-=4
-    A=avps_by_code[(mvid,mcode)]
-    #A=AVPItem()
-    #dictAVPcode2name(A,mcode,mvid)
-    ret=""
-    decoded=False
-    if A.type in asI32:
-        ret= decode_Integer32(msg)
-        decoded=True
-    if A.type in asI64:
-        decoded=True
-        ret= decode_Integer64(msg)
-    if A.type in asU32:
-        decoded=True
-        ret= decode_Unsigned32(msg)
-    if A.type in asU64:
-        decoded=True
-        ret= decode_Unsigned64(msg)
-    if A.type in asF32:
-        decoded=True
-        ret= decode_Float32(msg)
-    if A.type in asF64:
-        decoded=True
-        ret= decode_Float64(msg)        
-    if A.type in asUTF8:
-        decoded=True
-        ret= decode_UTF8String(msg,data_len)
-    if A.type in asIPAddress:
-        decoded=True
-        ret= decode_Address(msg)
-    if A.type in asIP:
-        decoded=True
-        ret= decode_IP(msg)        
-    if A.type in asTime:
-        decoded=True
-        ret= decode_Time(msg)
-    if A.type=="Grouped":
-        decoded=True
-        ret= decode_Grouped(msg)
-    if not decoded:
-      # default is OctetString
-      ret= decode_OctetString(msg,data_len)
+    A=avps_by_code[mvid,mcode]
+    ret = A.decode_fun(msg,data_len)
+
     return (A.name,ret)
 
 # Search for AVP in undecoded list
@@ -907,6 +818,19 @@ def stripHdr(H,msg):
 # Result: list of undecoded AVPs
 def splitMsgAVPs(msg):
     ret=[]
+    i=0
+    while i<len(msg):
+        slen="00"+msg[i+10:i+16]
+        mlen=struct.unpack("!I",slen.decode("hex"))[0]
+        #Increase to boundary
+        plen=calc_padding(mlen)
+        j=i+plen*2
+        #(avp,msg)=chop_msg(msg,2*plen)
+        avp=msg[i:j]
+        ret.update.append(avp)
+        i+=j
+    return ret
+-
     while len(msg)<>0:
       slen="00"+msg[10:16]
       mlen=struct.unpack("!I",slen.decode("hex"))[0]
@@ -919,7 +843,6 @@ def splitMsgAVPs(msg):
 def dictFromMsgAVPs(msg):
     ret={}
     i=0
-    
     while i<len(msg):
         slen="00"+msg[i+10:i+16]
         mlen=struct.unpack("!I",slen.decode("hex"))[0]
