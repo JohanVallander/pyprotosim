@@ -918,13 +918,17 @@ def splitMsgAVPs(msg):
 
 def dictFromMsgAVPs(msg):
     ret={}
-    while len(msg)<>0:
-      slen="00"+msg[10:16]
-      mlen=struct.unpack("!I",slen.decode("hex"))[0]
-      #Increase to boundary
-      plen=calc_padding(mlen)
-      (avp,msg)=chop_msg(msg,2*plen)
-      ret.update(decodeAVP_As_Dict(avp))
+    i=0
+    
+    while i<len(msg):
+        slen="00"+msg[i+10:i+16]
+        mlen=struct.unpack("!I",slen.decode("hex"))[0]
+        #Increase to boundary
+        plen=calc_padding(mlen)
+        j=i+plen*2
+        #(avp,msg)=chop_msg(msg,2*plen)
+        ret.update(decodeAVP_As_Dict(msg[i:j]))
+        i+=j
     return ret
 
 
