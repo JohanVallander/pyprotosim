@@ -1,4 +1,7 @@
-Python Protocol Simulator
+libDiameter.py from "Python Protocol Simulator" by Sergej Srepfler, modified slightly for improved speed
+Original readme:
+
+Python Protocol Simulator 
 -----------------------------
 
 Copyright (c) 2012, Sergej Srepfler <sergej.srepfler@gmail.com>
