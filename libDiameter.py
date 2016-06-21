@@ -171,8 +171,8 @@ def LoadDictionary(file):
         if tType in asGrouped:
             typedef_dict[tName]='Grouped'
             asGrouped.append(tName)
-        
-    print "creating dictionaries"
+
+            
     command_name_by_code={}
     command_code_by_name={}
     for command in dict_commands:
@@ -180,7 +180,6 @@ def LoadDictionary(file):
          cCode=int(command.getAttribute("code"))
          command_name_by_code[cCode]=cName
          command_code_by_name[cName]=cCode
-    print "command dict created"
     
     vendor_code_by_name={}
     vendor_name_by_code={}
@@ -189,7 +188,6 @@ def LoadDictionary(file):
         vId=vendor.getAttribute("vendor-id")
         vendor_code_by_name[vId]=vCode
         vendor_name_by_code[vCode]=vId
-    print "vendor dict created"
 
     avps_by_name={}
     avps_by_code={}
@@ -248,11 +246,12 @@ def LoadDictionary(file):
         elif A.type=="Enumerated":
             A.encode_fun=encode_Enumerated
             A.decode_fun=decode_Enumerated
+        elif A.type=="Grouped":
+            A.decode_fun=decode_Grouped
+        
         else:
             A.encode_fun=encode_OctetString
             A.decode_fun=decode_OctetString
-    print "avp dict created"
-        
     
 # Find AVP definition in dictionary: User-Name->1
 # on finish A contains all data
@@ -320,10 +319,9 @@ def dictCOMMANDname2code(name):
 
 # Find Command definition in dictionary: 257->Capabilities-Exchange
 def dictCOMMANDcode2name(flags,code):
-    global command_name_by_code
     cmd=ERROR
     try:
-        cmd=command_name_by_code["code"]
+        cmd=command_name_by_code[code]
     except:
         pass
     if cmd==ERROR:
@@ -473,8 +471,6 @@ def decode_IP(data,dlen=None):
     
 def decode_OctetString(data,dlen):     
     fs="!"+str(dlen-8)+"s"
-    dbg="Deconding String with format:",fs
-    logging.debug(dbg)
     ret=struct.unpack(fs,data.decode("hex")[0:dlen-8])[0]
     return ret
 
@@ -493,6 +489,7 @@ def decode_UTF8String(data,dlen):
     return utf8[0]
 
 def decode_Grouped(data,dlen=None):
+    print "decode_Grouped"
     ret=[]
     for gmsg in splitMsgAVPs(data):
         ret.append(decodeAVP(gmsg))
@@ -625,7 +622,6 @@ def do_encode(A,flags,data):
 
 # Find AVP Definition in dictionary and encode it
 def getAVPDef(AVP_Name,AVP_Value):
-    global avps_by_name
     A=avps_by_name[AVP_Name]
     dictAVPname2code(A,AVP_Name,AVP_Value)
     flags=checkMandatory(A.mandatory)
@@ -668,9 +664,7 @@ def decodeAVP_As_Dict(msg):
         (svid,msg)=chop_msg(msg,8)
         mvid=struct.unpack("!I",svid.decode("hex"))[0]
         data_len-=4
-    #A=AVPItem()
-    #dictAVPcode2name(A,mcode,mvid)
-    A=avps_by_code[mvid,mcode]
+    A=avps_by_code[(mvid,mcode)]
     ret=""
     ret = A.decode_fun(msg,data_len)
     return {A.name:ret}
@@ -691,7 +685,7 @@ def decodeAVP(msg):
         (svid,msg)=chop_msg(msg,8)
         mvid=struct.unpack("!I",svid.decode("hex"))[0]
         data_len-=4
-    A=avps_by_code[mvid,mcode]
+    A=avps_by_code[(mvid,mcode)]
     ret = A.decode_fun(msg,data_len)
 
     return (A.name,ret)
@@ -796,13 +790,13 @@ def initializeHops(H):
 def stripHdr(H,msg):
     if len(msg)==0:
         return ERROR
-    (sver,msg)=chop_msg(msg,2)
-    (slen,msg)=chop_msg(msg,6)
-    (sflag,msg)=chop_msg(msg,2)
-    (scode,msg)=chop_msg(msg,6)
-    (sapp,msg)=chop_msg(msg,8)
-    (shbh,msg)=chop_msg(msg,8)
-    (sete,msg)=chop_msg(msg,8)
+    sver=msg[0:2]
+    slen=msg[2:8]
+    sflag=msg[8:10]
+    scode=msg[10:16]
+    sapp=msg[16:24]
+    shbh=msg[24:32]
+    sete=msg[32:40]
     H.ver=ord(sver.decode("hex"))
     H.flags=ord(sflag.decode("hex"))
     H.len=struct.unpack("!I","\00"+slen.decode("hex"))[0]
@@ -810,7 +804,7 @@ def stripHdr(H,msg):
     H.appId=struct.unpack("!I",sapp.decode("hex"))[0]
     H.HopByHop=struct.unpack("!I",shbh.decode("hex"))[0]
     H.EndToEnd=struct.unpack("!I",sete.decode("hex"))[0]
-    H.msg=msg
+    H.msg=msg[40:]
     return 
 
 # Split AVPs from message
@@ -825,19 +819,9 @@ def splitMsgAVPs(msg):
         #Increase to boundary
         plen=calc_padding(mlen)
         j=i+plen*2
-        #(avp,msg)=chop_msg(msg,2*plen)
         avp=msg[i:j]
-        ret.update.append(avp)
-        i+=j
-    return ret
--
-    while len(msg)<>0:
-      slen="00"+msg[10:16]
-      mlen=struct.unpack("!I",slen.decode("hex"))[0]
-      #Increase to boundary
-      plen=calc_padding(mlen)
-      (avp,msg)=chop_msg(msg,2*plen)
-      ret.append(avp)
+        ret.append(avp)
+        i=j
     return ret
 
 def dictFromMsgAVPs(msg):
@@ -849,9 +833,8 @@ def dictFromMsgAVPs(msg):
         #Increase to boundary
         plen=calc_padding(mlen)
         j=i+plen*2
-        #(avp,msg)=chop_msg(msg,2*plen)
         ret.update(decodeAVP_As_Dict(msg[i:j]))
-        i+=j
+        i=j
     return ret
 
 
